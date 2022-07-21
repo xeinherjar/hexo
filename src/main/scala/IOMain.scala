@@ -5,14 +5,17 @@ import org.scalajs.dom.document
 import cats.effect.{IOApp, IO}
 import cats.effect.std.Random
 import cats.effect.implicits._
-import fs2.Stream
+import fs2._
 import org.scalajs.dom.Event
 import cats.effect.std.Queue
 import cats.effect.implicits._
 import cats.syntax._
 import cats.implicits._
 import cats.effect.std.Console
-import cats.effect.kernel.Async
+import cats.effect.Async
+import cats.effect.Concurrent
+import cats.effect.std.{Dispatcher, Queue}
+import cats.effect.ExitCode
 // import fs2.Chunk.Queue
 
 object IOMain extends IOApp.Simple {
@@ -26,36 +29,26 @@ object IOMain extends IOApp.Simple {
       .getContext("2d")
       .asInstanceOf[dom.CanvasRenderingContext2D]
     document.body.appendChild(canvas)
-
-    // document.addEventListener("click", (e: Event) => IO.println(s"HI!, $e")).pure
-    asdf[IO](document.body) *> IO.println("maybe")
-    // document.body.onclick{ e: dom.MouseEvent => IO.println(s"HI!, $e")}.pure
-
-    // IO.println("Hello world!") *> Program[IO](ctx).go()
-    // val q = Queue.circularBuffer[IO, Event](50)
-    // q.flatMap(queue =>
-    //   document.body
-    //     .addEventListener(
-    //       "click",
-    //       // (e: Event) => IO.defer(queue.offer(e)).unsafeRunAndForget()(using runtime),
-    //       (e: Event) => IO.println("hi") *> queue.offer(e),
-    //       false
-    //     )
-    //     .pure
-    // )
-
-    // Stream
-    //   .eval(q)
-    //   .flatMap(Stream.fromQueueUnterminated(_))
-    //   .evalMap((e: Event) => IO.println(e))
-    //   .compile
-    //   .drain
+    // IO.println("Hello world!") *>
+    (
+      Program[IO](ctx).go(),
+      (for {
+        dispatcher <- Stream.resource(Dispatcher[IO])
+        q <- Stream.eval(Queue.unbounded[IO, Event])
+        _ <- Stream.eval {
+          IO.delay {
+            document
+              .addEventListener(
+                "click",
+                (e: Event) => dispatcher.unsafeRunAndForget(q.offer(e))
+              )
+          }
+        }
+        _ <- Stream
+          .fromQueueUnterminated(q)
+          .evalMap(e => dispatcher.unsafeRunAndForget(IO.println(s"Yay? $e??")).pure[IO])
+      } yield ()).compile.drain
+    ).parTupled.void
 
   }
-  def asdf[F[_]: Async: Console](el: dom.Element): F[Unit] = el.addEventListener("click", (e: Event) =>
-    for {
-    _ <- Console[F].println("hi")
-    } yield ()
-  ).pure
 }
-
